@@ -120,6 +120,11 @@ actor ReminderScheduler {
     static let shared = ReminderScheduler()
 
     func requestAuthorization() async {
+        guard Bundle.main.bundleURL.pathExtension == "app" else {
+            await CrashReporter.shared.log(message: "notifications-skipped raw SwiftPM executable has no app bundle")
+            return
+        }
+
         do {
             try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
         } catch {
@@ -129,6 +134,11 @@ actor ReminderScheduler {
 
     func schedule(title: String, body: String, date: Date?) async {
         guard let date, date > .now else { return }
+        guard Bundle.main.bundleURL.pathExtension == "app" else {
+            await CrashReporter.shared.log(message: "notification-skipped \(title)")
+            return
+        }
+
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body

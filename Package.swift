@@ -13,7 +13,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "AgentDock",
-            path: "Sources/AgentDock"
+            path: "Sources/AgentDock",
+            resources: [
+                .process("Resources")
+            ]
         )
     ]
 )
