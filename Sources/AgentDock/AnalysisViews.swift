@@ -10,60 +10,83 @@ struct AnalysisDetailView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(analysis.intake.title)
                         .font(.headline)
+                        .foregroundStyle(Color(nsColor: .labelColor))
                         .lineLimit(2)
                     Label(analysis.classification.rawValue, systemImage: analysis.intake.sourceKind.symbolName)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                 }
 
                 Spacer()
 
                 Text(analysis.intake.createdAt, style: .time)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
             }
 
-            if !analysis.commitments.isEmpty {
-                SectionBlock(title: "Commitments", symbolName: "checkmark.circle") {
-                    ForEach(analysis.commitments) { commitment in
-                        CommitmentRow(commitment: commitment)
-                    }
-                }
-            }
-
-            if !analysis.followUps.isEmpty {
-                SectionBlock(title: "Waiting", symbolName: "clock.arrow.circlepath") {
-                    ForEach(analysis.followUps) { followUp in
-                        FollowUpRow(followUp: followUp)
-                    }
-                }
-            }
-
-            if !analysis.proposedActions.isEmpty {
-                SectionBlock(title: "Approval", symbolName: "bolt.badge.checkmark") {
-                    ForEach(analysis.proposedActions) { action in
-                        ActionRow(action: action) {
-                            store.approve(action)
+            ForEach(analysis.commitments) { commitment in
+                WorkCard(
+                    accent: .orange,
+                    symbol: "checkmark.circle.fill",
+                    title: commitment.title,
+                    subtitle: commitment.owner,
+                    chip: commitment.deadline ?? commitment.reminder,
+                    source: analysis.intake.sourceKind.rawValue,
+                    footer: analysis.costLabel
+                ) {
+                    Menu {
+                        ForEach(SnoozeOption.allCases) { option in
+                            Button(option.rawValue) {
+                                store.snoozeCommitment(commitment, option: option)
+                            }
                         }
+                    } label: {
+                        Image(systemName: "bell.badge")
                     }
+                    .menuStyle(.borderlessButton)
+                    .help("Snooze")
                 }
             }
 
-            SectionBlock(title: "Agent Squad", symbolName: "person.3.fill") {
+            ForEach(analysis.followUps) { followUp in
+                WorkCard(
+                    accent: .blue,
+                    symbol: "clock.arrow.circlepath",
+                    title: followUp.title,
+                    subtitle: followUp.responsibleParty,
+                    chip: followUp.checkBack,
+                    source: analysis.intake.sourceKind.rawValue,
+                    footer: analysis.costLabel
+                )
+            }
+
+            ForEach(analysis.proposedActions) { action in
+                ApprovalCard(action: action, footer: analysis.costLabel)
+            }
+
+            if !analysis.executionLogs.isEmpty {
+                ExecutionLogView(logs: analysis.executionLogs)
+            }
+
+            DisclosureGroup {
                 VStack(spacing: 8) {
                     ForEach(analysis.notes) { note in
                         AgentNoteRow(note: note)
                     }
                 }
+                .padding(.top, 8)
+            } label: {
+                Label("Agent Squad", systemImage: "person.3.fill")
+                    .font(.subheadline.weight(.semibold))
             }
 
-            SectionBlock(title: "Source Proof", symbolName: "paperclip") {
+            DisclosureGroup {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(analysis.evidence) { evidence in
                         HStack(alignment: .firstTextBaseline) {
                             Text(evidence.label)
-                                .foregroundStyle(.secondary)
-                                .frame(width: 104, alignment: .leading)
+                                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                                .frame(width: 92, alignment: .leading)
                             Text(evidence.value)
                                 .lineLimit(3)
                                 .textSelection(.enabled)
@@ -74,118 +97,165 @@ struct AnalysisDetailView: View {
 
                     Text(analysis.intake.body)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                         .lineLimit(5)
                         .textSelection(.enabled)
-                        .padding(.top, 4)
                 }
+                .padding(.top, 8)
+            } label: {
+                Label("Source Proof", systemImage: "paperclip")
+                    .font(.subheadline.weight(.semibold))
             }
         }
     }
 }
 
-private struct SectionBlock<Content: View>: View {
+private struct WorkCard<Trailing: View>: View {
+    let accent: Color
+    let symbol: String
     let title: String
-    let symbolName: String
-    @ViewBuilder var content: Content
+    let subtitle: String
+    let chip: String
+    let source: String
+    let footer: String
+    @ViewBuilder var trailing: Trailing
+
+    init(
+        accent: Color,
+        symbol: String,
+        title: String,
+        subtitle: String,
+        chip: String,
+        source: String,
+        footer: String,
+        @ViewBuilder trailing: () -> Trailing = { EmptyView() }
+    ) {
+        self.accent = accent
+        self.symbol = symbol
+        self.title = title
+        self.subtitle = subtitle
+        self.chip = chip
+        self.source = source
+        self.footer = footer
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            accent
+                .frame(width: 4)
+
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .top, spacing: 9) {
+                    Image(systemName: symbol)
+                        .foregroundStyle(accent)
+                        .frame(width: 20)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color(nsColor: .labelColor))
+                            .lineLimit(3)
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    }
+
+                    Spacer()
+                    trailing
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                }
+
+                HStack(spacing: 6) {
+                    Chip(text: chip, symbol: "calendar")
+                    Chip(text: source, symbol: "paperclip")
+                }
+
+                Text("Estimated cost: \(footer)")
+                    .font(.caption2)
+                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+            }
+            .padding(11)
+        }
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.92), in: RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+    }
+}
+
+private struct ApprovalCard: View {
+    @EnvironmentObject private var store: AgentDockStore
+    let action: ProposedAction
+    let footer: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: symbolName)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
+            WorkCard(
+                accent: .green,
+                symbol: "bolt.badge.checkmark.fill",
+                title: action.title,
+                subtitle: action.details.isEmpty ? action.approvalPrompt : action.details,
+                chip: action.tool.rawValue,
+                source: action.target ?? "Approval required",
+                footer: footer
+            )
 
-            content
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-    }
-}
+            HStack {
+                Button {
+                    store.editingAction = action
+                } label: {
+                    Label("Edit first", systemImage: "pencil")
+                }
 
-private struct CommitmentRow: View {
-    let commitment: Commitment
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(commitment.title)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(2)
                 Spacer()
-                PriorityBadge(priority: commitment.priority)
-            }
 
-            MetadataLine(symbolName: "person", text: commitment.owner)
-            MetadataLine(symbolName: "bell", text: commitment.reminder)
-            if let deadline = commitment.deadline {
-                MetadataLine(symbolName: "calendar", text: deadline)
+                Button {
+                    store.approve(action)
+                } label: {
+                    Label("Approve & Run", systemImage: "checkmark")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
             }
+            .font(.caption)
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(nsColor: .textBackgroundColor))
-        )
     }
 }
 
-private struct FollowUpRow: View {
-    let followUp: FollowUp
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(followUp.title)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(2)
-            MetadataLine(symbolName: "person.crop.circle.badge.questionmark", text: followUp.responsibleParty)
-            MetadataLine(symbolName: "calendar.badge.clock", text: followUp.checkBack)
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(nsColor: .textBackgroundColor))
-        )
-    }
-}
-
-private struct ActionRow: View {
-    let action: ProposedAction
-    let onApprove: () -> Void
+private struct ExecutionLogView: View {
+    let logs: [ExecutionLog]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(action.title)
-                        .font(.subheadline.weight(.medium))
-                    Text(action.tool.rawValue)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            Label("Execution Log", systemImage: "terminal")
+                .font(.subheadline.weight(.semibold))
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(logs) { log in
+                    Text("[\(log.createdAt.formatted(date: .omitted, time: .standard))] \(log.message)")
+                        .foregroundStyle(log.isError ? .red : Color(nsColor: .labelColor))
                 }
-
-                Spacer()
-
-                Button(action: onApprove) {
-                    Image(systemName: "checkmark")
-                }
-                .buttonStyle(.borderedProminent)
-                .help("Approve")
             }
-
-            Text(action.approvalPrompt)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            .font(.system(.caption, design: .monospaced))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(nsColor: .textBackgroundColor))
-        )
+    }
+}
+
+private struct Chip: View {
+    let text: String
+    let symbol: String
+
+    var body: some View {
+        Label(text, systemImage: symbol)
+            .font(.caption2.weight(.medium))
+            .lineLimit(1)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
     }
 }
 
@@ -195,7 +265,7 @@ private struct AgentNoteRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
             Image(systemName: note.symbolName)
-                .foregroundStyle(.teal)
+                .foregroundStyle(Color(nsColor: .controlAccentColor))
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -203,48 +273,11 @@ private struct AgentNoteRow: View {
                     .font(.caption.weight(.semibold))
                 Text(note.summary)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 0)
         }
-    }
-}
-
-private struct MetadataLine: View {
-    let symbolName: String
-    let text: String
-
-    var body: some View {
-        Label(text, systemImage: symbolName)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(2)
-    }
-}
-
-private struct PriorityBadge: View {
-    let priority: Priority
-
-    var color: Color {
-        switch priority {
-        case .low: .gray
-        case .normal: .blue
-        case .high: .orange
-        case .urgent: .red
-        }
-    }
-
-    var body: some View {
-        Text(priority.rawValue)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background(
-                Capsule()
-                    .fill(color.opacity(0.12))
-            )
     }
 }

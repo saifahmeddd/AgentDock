@@ -12,7 +12,7 @@ struct AgentPipeline {
 
         if commitments.isEmpty, followUps.isEmpty, proposedActions.isEmpty, !normalizedBody.isEmpty {
             commitments.append(
-                Commitment(
+                CommitmentDraft(
                     title: fallbackTitle(from: normalizedBody),
                     owner: "You",
                     priority: signals.priority,
@@ -41,15 +41,22 @@ struct AgentPipeline {
             followUps: followUps,
             proposedActions: proposedActions,
             evidence: buildEvidence(item: item, signals: signals),
-            notes: buildNotes(classification: classification, signals: signals, item: item)
+            notes: buildNotes(classification: classification, signals: signals, item: item),
+            modelID: nil,
+            inputTokens: nil,
+            outputTokens: nil,
+            estimatedCost: nil,
+            usedFallback: false,
+            executionLogs: [],
+            activeAgents: []
         )
     }
 
-    private func buildCommitments(item: IntakeItem, signals: Signals, snippets: [String]) -> [Commitment] {
+    private func buildCommitments(item: IntakeItem, signals: Signals, snippets: [String]) -> [CommitmentDraft] {
         guard signals.hasTaskLanguage || signals.hasPromiseLanguage else { return [] }
 
         return [
-            Commitment(
+            CommitmentDraft(
                 title: taskTitle(from: item.body),
                 owner: signals.owner,
                 priority: signals.priority,
@@ -60,11 +67,11 @@ struct AgentPipeline {
         ]
     }
 
-    private func buildFollowUps(item: IntakeItem, signals: Signals, snippets: [String]) -> [FollowUp] {
+    private func buildFollowUps(item: IntakeItem, signals: Signals, snippets: [String]) -> [FollowUpDraft] {
         guard signals.hasWaitingLanguage else { return [] }
 
         return [
-            FollowUp(
+            FollowUpDraft(
                 title: followUpTitle(from: item.body),
                 responsibleParty: signals.responsibleParty,
                 checkBack: signals.deadline.map { "Check back on \($0)" } ?? "Check back in 2 business days",
