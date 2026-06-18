@@ -17,6 +17,11 @@ let package = Package(
             resources: [
                 .process("Resources")
             ]
+        ),
+        .testTarget(
+            name: "AgentDockTests",
+            dependencies: ["AgentDock"],
+            path: "Tests/AgentDockTests"
         )
     ]
 )

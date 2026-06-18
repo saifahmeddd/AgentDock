@@ -3,6 +3,8 @@ import Foundation
 import PDFKit
 import UserNotifications
 
+// MARK: - SourceArchive
+
 actor SourceArchive {
     static let shared = SourceArchive()
 
@@ -33,24 +35,22 @@ actor SourceArchive {
 
         let archiveDirectory = applicationSupportDirectory().appendingPathComponent("Archive", isDirectory: true)
         try? fileManager.createDirectory(at: archiveDirectory, withIntermediateDirectories: true)
-        let archiveURL = archiveDirectory.appendingPathComponent("archive-\(Int(Date().timeIntervalSince1970)).json")
+        let stamp = Int(Date().timeIntervalSince1970)
+        let archiveURL = archiveDirectory.appendingPathComponent("archive-\(stamp).json")
 
-        let payload = analyses.map {
-            [
-                "id": $0.id.uuidString,
-                "title": $0.intake.title,
-                "classification": $0.classification.rawValue,
-                "createdAt": ISO8601DateFormatter().string(from: $0.intake.createdAt)
-            ]
-        }
-
-        if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]) {
+        // Persist full analysis JSON so nothing is lost — not just 4 fields.
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        if let data = try? encoder.encode(analyses) {
             try? data.write(to: archiveURL, options: .atomic)
         }
     }
 
-    private func applicationSupportDirectory() -> URL {
-        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+    func applicationSupportDirectory() -> URL {
+        guard let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            // Extremely unlikely: fall back to temp directory rather than crashing.
+            return fileManager.temporaryDirectory.appendingPathComponent("AgentDock", isDirectory: true)
+        }
         let directory = base.appendingPathComponent("AgentDock", isDirectory: true)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
@@ -80,22 +80,33 @@ actor SourceArchive {
     }
 }
 
+// MARK: - CrashReporter
+
 actor CrashReporter {
     static let shared = CrashReporter()
+
+    // Maximum character length of any single context string written to the log.
+    // Keeps potentially sensitive intake content from flooding the log file.
+    private let maxContextLength = 200
 
     func log(_ error: Error, context: String) async {
         await log(message: "[\(context)] \(error.localizedDescription)")
     }
 
     func log(message: String) async {
+        let redacted = redact(message)
         let fileManager = FileManager.default
-        let logs = fileManager.urls(for: .libraryDirectory, in: .userDomainMask).first!
+
+        guard let logsBase = fileManager.urls(for: .libraryDirectory, in: .userDomainMask).first else {
+            return
+        }
+        let logs = logsBase
             .appendingPathComponent("Logs", isDirectory: true)
             .appendingPathComponent("AgentDock", isDirectory: true)
         try? fileManager.createDirectory(at: logs, withIntermediateDirectories: true)
 
         let logURL = logs.appendingPathComponent("agentdock.log")
-        let line = "\(ISO8601DateFormatter().string(from: .now)) \(message)\n"
+        let line = "\(ISO8601DateFormatter().string(from: .now)) \(redacted)\n"
 
         if fileManager.fileExists(atPath: logURL.path),
            let handle = try? FileHandle(forWritingTo: logURL) {
@@ -106,7 +117,25 @@ actor CrashReporter {
             try? line.write(to: logURL, atomically: true, encoding: .utf8)
         }
     }
+
+    // Truncates long strings and strips any API key patterns before they reach disk.
+    private func redact(_ message: String) -> String {
+        var result = message
+        // Redact OpenRouter-style API keys (sk-or-v1-...) that may appear in error bodies.
+        if let regex = try? NSRegularExpression(pattern: #"sk-or-[a-zA-Z0-9\-_]{20,}"#) {
+            let range = NSRange(result.startIndex..<result.endIndex, in: result)
+            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "[REDACTED_KEY]")
+        }
+        // Truncate to keep intake content out of the log.
+        if result.count > maxContextLength {
+            let end = result.index(result.startIndex, offsetBy: maxContextLength)
+            result = String(result[..<end]) + "…[truncated]"
+        }
+        return result
+    }
 }
+
+// MARK: - ArchivedSourceProof
 
 struct ArchivedSourceProof: Sendable {
     let id: UUID
@@ -116,12 +145,14 @@ struct ArchivedSourceProof: Sendable {
     let thumbnailPath: String?
 }
 
+// MARK: - ReminderScheduler
+
 actor ReminderScheduler {
     static let shared = ReminderScheduler()
 
     func requestAuthorization() async {
         guard Bundle.main.bundleURL.pathExtension == "app" else {
-            await CrashReporter.shared.log(message: "notifications-skipped raw SwiftPM executable has no app bundle")
+            await CrashReporter.shared.log(message: "notifications-skipped: not an app bundle")
             return
         }
 
@@ -134,10 +165,7 @@ actor ReminderScheduler {
 
     func schedule(title: String, body: String, date: Date?) async {
         guard let date, date > .now else { return }
-        guard Bundle.main.bundleURL.pathExtension == "app" else {
-            await CrashReporter.shared.log(message: "notification-skipped \(title)")
-            return
-        }
+        guard Bundle.main.bundleURL.pathExtension == "app" else { return }
 
         let content = UNMutableNotificationContent()
         content.title = title
@@ -155,6 +183,8 @@ actor ReminderScheduler {
         }
     }
 }
+
+// MARK: - SnoozeOption
 
 enum SnoozeOption: String, CaseIterable, Identifiable {
     case oneDay = "1 day"

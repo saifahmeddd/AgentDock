@@ -17,6 +17,11 @@ struct AgentDockPanel: View {
             VStack(spacing: 0) {
                 HeaderView()
 
+                if store.hotkeyPermissionMissing {
+                    HotkeyPermissionBanner()
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
                 ScrollView {
                     VStack(spacing: 14) {
                         AgentSquadView(activeAgents: store.activeAgents)
@@ -49,7 +54,10 @@ struct AgentDockPanel: View {
 
                         ConnectorPillRow()
 
-                        if let analysis = store.selectedAnalysis {
+                        if store.isProcessing {
+                            ProcessingView()
+                                .transition(.opacity)
+                        } else if let analysis = store.selectedAnalysis {
                             AnalysisDetailView(analysis: analysis)
                                 .transition(.asymmetric(
                                     insertion: .move(edge: .trailing).combined(with: .opacity),
@@ -80,6 +88,8 @@ struct AgentDockPanel: View {
         }
         .animation(.spring(response: 0.34, dampingFraction: 0.86), value: store.selectedAnalysisID)
         .animation(.spring(response: 0.28, dampingFraction: 0.9), value: store.sourceDetectionBadge)
+        .animation(.spring(response: 0.28, dampingFraction: 0.9), value: store.hotkeyPermissionMissing)
+        .animation(.spring(response: 0.28, dampingFraction: 0.9), value: store.isProcessing)
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
@@ -91,9 +101,7 @@ struct AgentDockPanel: View {
                 provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
                     let url = urlFromProviderItem(item)
                     Task { @MainActor in
-                        if let url {
-                            store.ingestFiles([url])
-                        }
+                        if let url { store.ingestFiles([url]) }
                     }
                 }
                 continue
@@ -104,9 +112,7 @@ struct AgentDockPanel: View {
                 provider.loadObject(ofClass: NSString.self) { object, _ in
                     let text = object as? String
                     Task { @MainActor in
-                        if let text {
-                            store.ingestDroppedText(text)
-                        }
+                        if let text { store.ingestDroppedText(text) }
                     }
                 }
             }
@@ -116,21 +122,14 @@ struct AgentDockPanel: View {
     }
 
     private func urlFromProviderItem(_ item: NSSecureCoding?) -> URL? {
-        if let url = item as? URL {
-            return url
-        }
-
-        if let data = item as? Data {
-            return URL(dataRepresentation: data, relativeTo: nil)
-        }
-
-        if let string = item as? String {
-            return URL(string: string)
-        }
-
+        if let url = item as? URL { return url }
+        if let data = item as? Data { return URL(dataRepresentation: data, relativeTo: nil) }
+        if let string = item as? String { return URL(string: string) }
         return nil
     }
 }
+
+// MARK: - HeaderView
 
 private struct HeaderView: View {
     @EnvironmentObject private var store: AgentDockStore
@@ -147,9 +146,11 @@ private struct HeaderView: View {
                 Text("AgentDock")
                     .font(.headline)
                     .foregroundStyle(Color(nsColor: .labelColor))
-                Text("Drop work. Agents handle it.")
+                Text(store.analyses.isEmpty ? "Drop work. Agents handle it." : "\(store.analyses.count) analysis\(store.analyses.count == 1 ? "" : "es")")
                     .font(.caption)
                     .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    .contentTransition(.numericText())
+                    .animation(.default, value: store.analyses.count)
             }
 
             Spacer()
@@ -165,13 +166,41 @@ private struct HeaderView: View {
                 Image(systemName: "trash")
             }
             .buttonStyle(.borderless)
-            .help("Clear")
+            .help("Clear all analyses")
             .disabled(store.analyses.isEmpty)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
     }
 }
+
+// MARK: - HotkeyPermissionBanner
+
+private struct HotkeyPermissionBanner: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "keyboard.badge.exclamationmark")
+                .foregroundStyle(.orange)
+            Text("Option+Space requires Accessibility permission.")
+                .font(.caption)
+                .foregroundStyle(Color(nsColor: .labelColor))
+            Spacer()
+            Button("Open Settings") {
+                NSWorkspace.shared.open(
+                    URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+                )
+            }
+            .font(.caption)
+            .buttonStyle(.borderless)
+            .foregroundStyle(Color(nsColor: .controlAccentColor))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.1))
+    }
+}
+
+// MARK: - AgentSquadView
 
 private struct AgentSquadView: View {
     let activeAgents: Set<AgentRole>
@@ -182,10 +211,19 @@ private struct AgentSquadView: View {
                 VStack(spacing: 5) {
                     Image(systemName: agent.symbolName)
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color(nsColor: .controlAccentColor))
+                        .foregroundStyle(
+                            activeAgents.contains(agent)
+                                ? Color(nsColor: .controlAccentColor)
+                                : Color(nsColor: .tertiaryLabelColor)
+                        )
                         .frame(width: 38, height: 38)
-                        .background(.thinMaterial, in: Circle())
-                        .opacity(activeAgents.contains(agent) && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.45 : 1)
+                        .background(
+                            activeAgents.contains(agent)
+                                ? AnyShapeStyle(.thinMaterial)
+                                : AnyShapeStyle(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+                            , in: Circle()
+                        )
+                        .opacity(activeAgents.contains(agent) && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.55 : 1)
                         .animation(
                             activeAgents.contains(agent) && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
                                 ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true)
@@ -202,6 +240,8 @@ private struct AgentSquadView: View {
         .frame(maxWidth: .infinity)
     }
 }
+
+// MARK: - ComposerView
 
 private struct ComposerView: View {
     @EnvironmentObject private var store: AgentDockStore
@@ -223,7 +263,7 @@ private struct ComposerView: View {
                     Label("Analyze", systemImage: "wand.and.stars")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(store.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(store.draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isProcessing)
             }
 
             TextEditor(text: $store.draftText)
@@ -240,26 +280,45 @@ private struct ComposerView: View {
     }
 }
 
+// MARK: - ProcessingView
+
+private struct ProcessingView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.large)
+            Text("Analyzing…")
+                .font(.subheadline)
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+    }
+}
+
+// MARK: - EmptyStateView
+
 private struct EmptyStateView: View {
     @State private var arrowOffset = -4.0
 
     var body: some View {
         VStack(spacing: 10) {
-            Image(systemName: "arrow.up")
+            Image(systemName: "tray.and.arrow.down")
                 .font(.system(size: 26, weight: .semibold))
                 .foregroundStyle(Color(nsColor: .controlAccentColor))
                 .offset(y: arrowOffset)
                 .onAppear {
                     guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-                    withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-                        arrowOffset = 5
+                    withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                        arrowOffset = 4
                     }
                 }
 
             Text("Drop work here")
                 .font(.headline)
                 .foregroundStyle(Color(nsColor: .labelColor))
-            Text("Slack, Gmail, PDFs, screenshots, browser pages, and copied text.")
+
+            Text("Slack, Gmail, PDFs, screenshots, browser links, and copied text.")
                 .font(.caption)
                 .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                 .multilineTextAlignment(.center)
@@ -269,6 +328,8 @@ private struct EmptyStateView: View {
         .padding(.vertical, 20)
     }
 }
+
+// MARK: - DropZoneView
 
 private struct DropZoneView: View {
     let isTargeted: Bool
@@ -296,7 +357,9 @@ private struct DropZoneView: View {
         .background(
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(isTargeted ? Color(nsColor: .controlAccentColor).opacity(0.92) : Color(nsColor: .controlBackgroundColor).opacity(0.58))
+                    .fill(isTargeted
+                          ? Color(nsColor: .controlAccentColor).opacity(0.92)
+                          : Color(nsColor: .controlBackgroundColor).opacity(0.58))
                 if isTargeted {
                     LinearGradient(
                         colors: [.clear, .white.opacity(0.28), .clear],
@@ -333,6 +396,8 @@ private struct DropTypePill: View {
     }
 }
 
+// MARK: - SourceBadgeView
+
 private struct SourceBadgeView: View {
     let text: String
 
@@ -346,19 +411,22 @@ private struct SourceBadgeView: View {
     }
 }
 
+// MARK: - ConnectorPillRow
+
 private struct ConnectorPillRow: View {
-    private let connected: Set<ActionTool> = [.gmail, .calendar]
+    @EnvironmentObject private var preferences: AppPreferences
 
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 7) {
                 ForEach(ActionTool.allCases) { tool in
+                    let state = preferences.connectorState(for: tool)
                     HStack(spacing: 5) {
                         Circle()
-                            .fill(color(for: tool))
+                            .fill(indicatorColor(for: tool, state: state))
                             .frame(width: 7, height: 7)
                         Text(tool.rawValue)
-                        Text(connected.contains(tool) ? "Connected" : "Connect")
+                        Text(stateLabel(state))
                             .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                     }
                     .font(.caption2.weight(.medium))
@@ -371,42 +439,58 @@ private struct ConnectorPillRow: View {
         .scrollIndicators(.hidden)
     }
 
-    private func color(for tool: ActionTool) -> Color {
+    private func stateLabel(_ state: ConnectorAuthState) -> String {
+        switch state {
+        case .notConnected: "Connect"
+        case .connectedViaSystem: "Ready"
+        case .connected: "Connected"
+        }
+    }
+
+    private func indicatorColor(for tool: ActionTool, state: ConnectorAuthState) -> Color {
+        guard state != .notConnected else { return Color(nsColor: .tertiaryLabelColor) }
         switch tool {
-        case .gmail: .red
-        case .calendar: .green
-        case .notion: Color(nsColor: .labelColor)
-        case .linear: .purple
-        case .slack: .blue
-        case .microsoft365: .orange
+        case .gmail: return .red
+        case .calendar: return .green
+        case .notion: return Color(nsColor: .labelColor)
+        case .linear: return .purple
+        case .slack: return .blue
+        case .microsoft365: return .orange
         }
     }
 }
+
+// MARK: - OnboardingView
 
 private struct OnboardingView: View {
     @EnvironmentObject private var preferences: AppPreferences
     @Environment(\.dismiss) private var dismiss
     @State private var step = 0
 
+    private let symbols = ["square.stack.3d.up", "key.fill", "tray.and.arrow.down"]
+    private let titles = ["Welcome to AgentDock", "Add OpenRouter", "Drop something to try it"]
+    private let bodies = [
+        "A native menu bar AI action layer for messy work — Slack, Gmail, PDFs, and more.",
+        "Paste your API key in Settings. It is stored securely in macOS Keychain.",
+        "Drop text, screenshots, PDFs, browser links, or files into the panel."
+    ]
+
     var body: some View {
         VStack(spacing: 22) {
             Spacer()
-            Image(systemName: ["square.stack.3d.up", "key.fill", "arrow.down.doc"][step])
+            Image(systemName: symbols[step])
                 .font(.system(size: 44, weight: .semibold))
                 .foregroundStyle(Color(nsColor: .controlAccentColor))
 
-            Text(["Welcome to AgentDock", "Add OpenRouter", "Drop something to try it"][step])
+            Text(titles[step])
                 .font(.title2.weight(.semibold))
 
-            Text([
-                "A native menu bar action layer for messy work.",
-                "Paste your API key in Settings. It is stored in macOS Keychain.",
-                "Drop text, screenshots, PDFs, links, or files into the panel."
-            ][step])
-            .font(.body)
-            .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 34)
+            Text(bodies[step])
+                .font(.body)
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 34)
+                .fixedSize(horizontal: false, vertical: true)
 
             Spacer()
 
@@ -416,12 +500,23 @@ private struct OnboardingView: View {
                     dismiss()
                 }
                 Spacer()
+
+                HStack(spacing: 6) {
+                    ForEach(0..<3, id: \.self) { i in
+                        Circle()
+                            .fill(i == step ? Color(nsColor: .controlAccentColor) : Color(nsColor: .tertiaryLabelColor))
+                            .frame(width: 6, height: 6)
+                    }
+                }
+
+                Spacer()
+
                 Button(step == 2 ? "Done" : "Next") {
                     if step == 2 {
                         preferences.onboardingCompleted = true
                         dismiss()
                     } else {
-                        step += 1
+                        withAnimation { step += 1 }
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -430,6 +525,8 @@ private struct OnboardingView: View {
         }
     }
 }
+
+// MARK: - ActionEditSheet
 
 private struct ActionEditSheet: View {
     @EnvironmentObject private var store: AgentDockStore
@@ -444,23 +541,32 @@ private struct ActionEditSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Edit Action")
-                .font(.headline)
-            Text(action.title)
-                .font(.subheadline)
-                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Edit Action")
+                    .font(.headline)
+                Text(action.title)
+                    .font(.subheadline)
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+            }
+
             TextEditor(text: $editedDetails)
                 .font(.body)
                 .frame(height: 210)
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
                 )
+
+            Text("This will be sent to \(action.tool.rawValue). Review carefully before approving.")
+                .font(.caption)
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+
             HStack {
                 Spacer()
-                Button("Cancel") {
-                    dismiss()
-                }
+                Button("Cancel") { dismiss() }
                 Button("Approve & Run") {
                     var edited = action
                     edited.details = editedDetails
@@ -468,11 +574,14 @@ private struct ActionEditSheet: View {
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(.green)
             }
         }
         .padding(18)
     }
 }
+
+// MARK: - VisualEffectView
 
 struct VisualEffectView: NSViewRepresentable {
     let material: NSVisualEffectView.Material

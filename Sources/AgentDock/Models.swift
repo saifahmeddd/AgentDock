@@ -1,7 +1,9 @@
 import Foundation
 import SwiftData
 
-enum IntakeSourceKind: String, CaseIterable, Identifiable {
+// MARK: - Enums
+
+enum IntakeSourceKind: String, CaseIterable, Identifiable, Codable {
     case slack = "Slack"
     case whatsapp = "WhatsApp"
     case gmail = "Gmail"
@@ -31,7 +33,7 @@ enum IntakeSourceKind: String, CaseIterable, Identifiable {
     }
 }
 
-enum Priority: String, CaseIterable, Identifiable {
+enum Priority: String, CaseIterable, Identifiable, Codable {
     case low = "Low"
     case normal = "Normal"
     case high = "High"
@@ -40,7 +42,7 @@ enum Priority: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-enum ActionTool: String, CaseIterable, Identifiable {
+enum ActionTool: String, CaseIterable, Identifiable, Codable {
     case gmail = "Gmail"
     case calendar = "Calendar"
     case notion = "Notion"
@@ -51,14 +53,14 @@ enum ActionTool: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-enum WorkClassification: String {
+enum WorkClassification: String, Codable {
     case humanTask = "Human task"
     case waitingItem = "Waiting item"
     case aiAction = "AI-doable action"
     case referenceOnly = "Reference only"
 }
 
-enum AgentRole: String, CaseIterable, Identifiable {
+enum AgentRole: String, CaseIterable, Identifiable, Codable {
     case extractor = "Extractor"
     case tracker = "Tracker"
     case scheduler = "Scheduler"
@@ -78,7 +80,7 @@ enum AgentRole: String, CaseIterable, Identifiable {
     }
 }
 
-enum OpenRouterModel: String, CaseIterable, Identifiable {
+enum OpenRouterModel: String, CaseIterable, Identifiable, Codable {
     case grokMini = "x-ai/grok-3-mini"
     case geminiFlash = "google/gemini-2.5-flash"
     case mistralSmall = "mistralai/mistral-small"
@@ -92,6 +94,15 @@ enum OpenRouterModel: String, CaseIterable, Identifiable {
         case .geminiFlash: "Gemini Flash 2.5"
         case .mistralSmall: "Mistral Small"
         case .claudeSonnet: "Claude Sonnet 4.5"
+        }
+    }
+
+    var latencyLabel: String {
+        switch self {
+        case .grokMini: "Fast"
+        case .geminiFlash: "Fast"
+        case .mistralSmall: "Fast"
+        case .claudeSonnet: "Moderate"
         }
     }
 
@@ -113,6 +124,12 @@ enum OpenRouterModel: String, CaseIterable, Identifiable {
         }
     }
 
+    var costSummary: String {
+        let input = NSDecimalNumber(decimal: inputPricePerMillionTokens).stringValue
+        let output = NSDecimalNumber(decimal: outputPricePerMillionTokens).stringValue
+        return "$\(input) / $\(output) per M tokens"
+    }
+
     static let fallback: OpenRouterModel = .grokMini
 }
 
@@ -123,7 +140,9 @@ enum VerificationStatus: Equatable {
     case invalid(String)
 }
 
-struct IntakeItem: Identifiable, Equatable {
+// MARK: - In-Memory Structs (Codable for persistence)
+
+struct IntakeItem: Identifiable, Equatable, Codable {
     let id: UUID
     let createdAt: Date
     var title: String
@@ -157,8 +176,8 @@ struct IntakeItem: Identifiable, Equatable {
     }
 }
 
-struct AgentAnalysis: Identifiable {
-    let id = UUID()
+struct AgentAnalysis: Identifiable, Codable {
+    let id: UUID
     let intake: IntakeItem
     var classification: WorkClassification
     var commitments: [CommitmentDraft]
@@ -169,37 +188,107 @@ struct AgentAnalysis: Identifiable {
     var modelID: String?
     var inputTokens: Int?
     var outputTokens: Int?
-    var estimatedCost: Decimal?
+    var estimatedCostString: String?
     var usedFallback: Bool
     var executionLogs: [ExecutionLog]
-    var activeAgents: Set<AgentRole>
+    var activeAgents: [AgentRole]
+
+    init(
+        id: UUID = UUID(),
+        intake: IntakeItem,
+        classification: WorkClassification,
+        commitments: [CommitmentDraft],
+        followUps: [FollowUpDraft],
+        proposedActions: [ProposedAction],
+        evidence: [EvidenceItem],
+        notes: [AgentNote],
+        modelID: String? = nil,
+        inputTokens: Int? = nil,
+        outputTokens: Int? = nil,
+        estimatedCost: Decimal? = nil,
+        usedFallback: Bool,
+        executionLogs: [ExecutionLog],
+        activeAgents: Set<AgentRole> = []
+    ) {
+        self.id = id
+        self.intake = intake
+        self.classification = classification
+        self.commitments = commitments
+        self.followUps = followUps
+        self.proposedActions = proposedActions
+        self.evidence = evidence
+        self.notes = notes
+        self.modelID = modelID
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.estimatedCostString = estimatedCost.map { NSDecimalNumber(decimal: $0).stringValue }
+        self.usedFallback = usedFallback
+        self.executionLogs = executionLogs
+        self.activeAgents = Array(activeAgents)
+    }
+
+    var estimatedCost: Decimal? {
+        estimatedCostString.flatMap { Decimal(string: $0) }
+    }
 
     var costLabel: String {
-        guard let estimatedCost else { return "Local analysis" }
-        return "$" + NSDecimalNumber(decimal: estimatedCost).stringValue
+        guard let estimatedCostString else { return "Local analysis" }
+        return "$\(estimatedCostString)"
     }
 }
 
-struct CommitmentDraft: Identifiable {
-    let id = UUID()
+struct CommitmentDraft: Identifiable, Codable {
+    let id: UUID
     var title: String
     var owner: String
     var priority: Priority
     var deadline: String?
     var reminder: String
     var sourceProof: String
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        owner: String,
+        priority: Priority,
+        deadline: String?,
+        reminder: String,
+        sourceProof: String
+    ) {
+        self.id = id
+        self.title = title
+        self.owner = owner
+        self.priority = priority
+        self.deadline = deadline
+        self.reminder = reminder
+        self.sourceProof = sourceProof
+    }
 }
 
-struct FollowUpDraft: Identifiable {
-    let id = UUID()
+struct FollowUpDraft: Identifiable, Codable {
+    let id: UUID
     var title: String
     var responsibleParty: String
     var checkBack: String
     var sourceProof: String
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        responsibleParty: String,
+        checkBack: String,
+        sourceProof: String
+    ) {
+        self.id = id
+        self.title = title
+        self.responsibleParty = responsibleParty
+        self.checkBack = checkBack
+        self.sourceProof = sourceProof
+    }
 }
 
-struct ProposedAction: Identifiable {
-    let id = UUID()
+struct ProposedAction: Identifiable, Codable {
+    let id: UUID
     var title: String
     var tool: ActionTool
     var approvalPrompt: String
@@ -208,6 +297,7 @@ struct ProposedAction: Identifiable {
     var target: String?
 
     init(
+        id: UUID = UUID(),
         title: String,
         tool: ActionTool,
         approvalPrompt: String,
@@ -215,6 +305,7 @@ struct ProposedAction: Identifiable {
         details: String = "",
         target: String? = nil
     ) {
+        self.id = id
         self.title = title
         self.tool = tool
         self.approvalPrompt = approvalPrompt
@@ -224,31 +315,47 @@ struct ProposedAction: Identifiable {
     }
 }
 
-struct EvidenceItem: Identifiable {
-    let id = UUID()
+struct EvidenceItem: Identifiable, Codable {
+    let id: UUID
     var label: String
     var value: String
+
+    init(id: UUID = UUID(), label: String, value: String) {
+        self.id = id
+        self.label = label
+        self.value = value
+    }
 }
 
-struct AgentNote: Identifiable {
-    let id = UUID()
+struct AgentNote: Identifiable, Codable {
+    let id: UUID
     var agentName: String
     var summary: String
     var symbolName: String
+
+    init(id: UUID = UUID(), agentName: String, summary: String, symbolName: String) {
+        self.id = id
+        self.agentName = agentName
+        self.summary = summary
+        self.symbolName = symbolName
+    }
 }
 
-struct ExecutionLog: Identifiable {
-    let id = UUID()
+struct ExecutionLog: Identifiable, Codable {
+    let id: UUID
     let createdAt: Date
     var message: String
     var isError: Bool
 
-    init(createdAt: Date = .now, message: String, isError: Bool = false) {
+    init(id: UUID = UUID(), createdAt: Date = .now, message: String, isError: Bool = false) {
+        self.id = id
         self.createdAt = createdAt
         self.message = message
         self.isError = isError
     }
 }
+
+// MARK: - SwiftData Models
 
 @Model
 final class Commitment {
@@ -328,5 +435,27 @@ final class SourceProof {
         self.originalSource = originalSource
         self.thumbnailPath = thumbnailPath
         self.createdAt = .now
+    }
+}
+
+// Stores full AgentAnalysis as JSON so nothing is lost on restart.
+@Model
+final class StoredAnalysis {
+    @Attribute(.unique) var id: UUID
+    var jsonData: Data
+    var intakeTitle: String
+    var classificationRaw: String
+    var createdAt: Date
+
+    init(id: UUID, jsonData: Data, intakeTitle: String, classificationRaw: String, createdAt: Date) {
+        self.id = id
+        self.jsonData = jsonData
+        self.intakeTitle = intakeTitle
+        self.classificationRaw = classificationRaw
+        self.createdAt = createdAt
+    }
+
+    func decode() -> AgentAnalysis? {
+        try? JSONDecoder().decode(AgentAnalysis.self, from: jsonData)
     }
 }

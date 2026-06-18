@@ -7,14 +7,17 @@ final class AgentDockAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusController = AgentDockStatusController(environment: .shared)
-        hotKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .option,
-                  event.keyCode == 49 else {
-                return
-            }
-            Task { @MainActor in
-                self?.statusController?.togglePanel()
-            }
+
+        // Check whether Input Monitoring permission is available before installing the monitor.
+        // NSEvent.addGlobalMonitorForEvents requires the Input Monitoring TCC entitlement.
+        // If it's missing the monitor silently receives nothing; we surface a banner instead.
+        let isTrusted = checkInputMonitoringPermission()
+        Task { @MainActor in
+            AppEnvironment.shared.store.hotkeyPermissionMissing = !isTrusted
+        }
+
+        if isTrusted {
+            installHotKeyMonitor()
         }
     }
 
@@ -22,6 +25,35 @@ final class AgentDockAppDelegate: NSObject, NSApplicationDelegate {
         if let hotKeyMonitor {
             NSEvent.removeMonitor(hotKeyMonitor)
         }
+    }
+
+    // Public so the settings/permission banner can re-check and re-install after the user grants access.
+    func retryHotKeyRegistration() {
+        guard hotKeyMonitor == nil else { return }
+        if checkInputMonitoringPermission() {
+            installHotKeyMonitor()
+            Task { @MainActor in
+                AppEnvironment.shared.store.hotkeyPermissionMissing = false
+            }
+        }
+    }
+
+    private func installHotKeyMonitor() {
+        hotKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .option,
+                  event.keyCode == 49 else { return }
+            Task { @MainActor in
+                self?.statusController?.togglePanel()
+            }
+        }
+    }
+
+    // AXIsProcessTrusted is an imperfect proxy here: Accessibility and Input Monitoring are
+    // separate TCC categories on recent macOS, but there is no public API to check Input
+    // Monitoring directly. In practice, power users who grant one often grant both, and this
+    // gives us a reliable fallback signal without private API.
+    private func checkInputMonitoringPermission() -> Bool {
+        AXIsProcessTrusted()
     }
 }
 
@@ -122,9 +154,7 @@ final class AgentDockStatusController: NSObject, NSPopoverDelegate {
         statusItem.menu = nil
     }
 
-    @objc private func openFromMenu() {
-        openPanel()
-    }
+    @objc private func openFromMenu() { openPanel() }
 
     @objc private func pasteAndAnalyze() {
         let paste = NSPasteboard.general.string(forType: .string) ?? ""
@@ -137,9 +167,7 @@ final class AgentDockStatusController: NSObject, NSPopoverDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    @objc private func quit() {
-        NSApp.terminate(nil)
-    }
+    @objc private func quit() { NSApp.terminate(nil) }
 
     func popoverDidClose(_ notification: Notification) {
         environment.store.panelDidClose()
@@ -151,10 +179,7 @@ final class AgentDockStatusController: NSObject, NSPopoverDelegate {
 
     private func animatePanelOpen() {
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
-              let window = popover.contentViewController?.view.window else {
-            return
-        }
-
+              let window = popover.contentViewController?.view.window else { return }
         window.alphaValue = 0
         window.animator().alphaValue = 1
     }
@@ -164,11 +189,8 @@ final class AgentDockStatusController: NSObject, NSPopoverDelegate {
         let image = NSImage(size: size)
         image.lockFocus()
 
-        let symbol = NSImage(
-            systemSymbolName: "square.stack.3d.up",
-            accessibilityDescription: "AgentDock"
-        )
-        symbol?.withSymbolConfiguration(.init(pointSize: 16, weight: .semibold))?
+        NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: "AgentDock")?
+            .withSymbolConfiguration(.init(pointSize: 16, weight: .semibold))?
             .draw(in: NSRect(x: 2, y: 1, width: 18, height: 16))
 
         if hasPending {

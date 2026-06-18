@@ -1,67 +1,69 @@
 import SwiftUI
 
+// MARK: - AnalysisDetailView
+
 struct AnalysisDetailView: View {
     @EnvironmentObject private var store: AgentDockStore
     let analysis: AgentAnalysis
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(analysis.intake.title)
-                        .font(.headline)
-                        .foregroundStyle(Color(nsColor: .labelColor))
-                        .lineLimit(2)
-                    Label(analysis.classification.rawValue, systemImage: analysis.intake.sourceKind.symbolName)
-                        .font(.caption)
-                        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            AnalysisHeaderRow(analysis: analysis)
 
-                Spacer()
-
-                Text(analysis.intake.createdAt, style: .time)
-                    .font(.caption)
-                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+            if analysis.usedFallback {
+                FallbackBanner()
             }
 
-            ForEach(analysis.commitments) { commitment in
-                WorkCard(
-                    accent: .orange,
-                    symbol: "checkmark.circle.fill",
-                    title: commitment.title,
-                    subtitle: commitment.owner,
-                    chip: commitment.deadline ?? commitment.reminder,
-                    source: analysis.intake.sourceKind.rawValue,
-                    footer: analysis.costLabel
-                ) {
-                    Menu {
-                        ForEach(SnoozeOption.allCases) { option in
-                            Button(option.rawValue) {
-                                store.snoozeCommitment(commitment, option: option)
+            if !analysis.commitments.isEmpty {
+                SectionHeader(title: "Commitments", symbol: "checkmark.circle.fill", color: .orange)
+                ForEach(analysis.commitments) { commitment in
+                    WorkCard(
+                        accent: .orange,
+                        symbol: "checkmark.circle.fill",
+                        title: commitment.title,
+                        badge: commitment.priority.rawValue,
+                        badgeColor: priorityColor(commitment.priority),
+                        subtitle: commitment.owner,
+                        chip: commitment.deadline ?? commitment.reminder,
+                        chipSymbol: "calendar"
+                    ) {
+                        Menu {
+                            ForEach(SnoozeOption.allCases) { option in
+                                Button(option.rawValue) {
+                                    store.snoozeCommitment(commitment, option: option)
+                                }
                             }
+                        } label: {
+                            Image(systemName: "bell.badge")
+                                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                         }
-                    } label: {
-                        Image(systemName: "bell.badge")
+                        .menuStyle(.borderlessButton)
+                        .help("Snooze reminder")
                     }
-                    .menuStyle(.borderlessButton)
-                    .help("Snooze")
                 }
             }
 
-            ForEach(analysis.followUps) { followUp in
-                WorkCard(
-                    accent: .blue,
-                    symbol: "clock.arrow.circlepath",
-                    title: followUp.title,
-                    subtitle: followUp.responsibleParty,
-                    chip: followUp.checkBack,
-                    source: analysis.intake.sourceKind.rawValue,
-                    footer: analysis.costLabel
-                )
+            if !analysis.followUps.isEmpty {
+                SectionHeader(title: "Follow-ups", symbol: "clock.arrow.circlepath", color: .blue)
+                ForEach(analysis.followUps) { followUp in
+                    WorkCard(
+                        accent: .blue,
+                        symbol: "clock.arrow.circlepath",
+                        title: followUp.title,
+                        badge: nil,
+                        badgeColor: .clear,
+                        subtitle: followUp.responsibleParty,
+                        chip: followUp.checkBack,
+                        chipSymbol: "person"
+                    )
+                }
             }
 
-            ForEach(analysis.proposedActions) { action in
-                ApprovalCard(action: action, footer: analysis.costLabel)
+            if !analysis.proposedActions.isEmpty {
+                SectionHeader(title: "Proposed Actions", symbol: "bolt.badge.checkmark.fill", color: .green)
+                ForEach(analysis.proposedActions) { action in
+                    ApprovalCard(action: action, costLabel: analysis.costLabel)
+                }
             }
 
             if !analysis.executionLogs.isEmpty {
@@ -95,6 +97,9 @@ struct AnalysisDetailView: View {
                         .font(.caption)
                     }
 
+                    Divider()
+                        .padding(.vertical, 4)
+
                     Text(analysis.intake.body)
                         .font(.caption)
                         .foregroundStyle(Color(nsColor: .secondaryLabelColor))
@@ -106,100 +111,236 @@ struct AnalysisDetailView: View {
                 Label("Source Proof", systemImage: "paperclip")
                     .font(.subheadline.weight(.semibold))
             }
+
+            if let modelID = analysis.modelID {
+                CostFooter(modelID: modelID, costLabel: analysis.costLabel)
+            }
+        }
+    }
+
+    private func priorityColor(_ priority: Priority) -> Color {
+        switch priority {
+        case .urgent: .red
+        case .high: .orange
+        case .normal: Color(nsColor: .secondaryLabelColor)
+        case .low: .blue
         }
     }
 }
 
-private struct WorkCard<Trailing: View>: View {
+// MARK: - Supporting sub-views
+
+private struct AnalysisHeaderRow: View {
+    let analysis: AgentAnalysis
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: classificationSymbol)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(classificationColor)
+                .frame(width: 28, height: 28)
+                .background(classificationColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(analysis.intake.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color(nsColor: .labelColor))
+                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    Label(analysis.classification.rawValue, systemImage: analysis.intake.sourceKind.symbolName)
+                        .font(.caption2)
+                        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    Text("·")
+                        .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                        .font(.caption2)
+                    Text(analysis.intake.createdAt, style: .time)
+                        .font(.caption2)
+                        .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                }
+            }
+
+            Spacer()
+        }
+    }
+
+    private var classificationSymbol: String {
+        switch analysis.classification {
+        case .humanTask: "person.fill.checkmark"
+        case .waitingItem: "clock.arrow.circlepath"
+        case .aiAction: "bolt.fill"
+        case .referenceOnly: "doc.text"
+        }
+    }
+
+    private var classificationColor: Color {
+        switch analysis.classification {
+        case .humanTask: .orange
+        case .waitingItem: .blue
+        case .aiAction: .green
+        case .referenceOnly: Color(nsColor: .secondaryLabelColor)
+        }
+    }
+}
+
+private struct FallbackBanner: View {
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
+                .font(.caption)
+            Text("AI unavailable — used local analysis. Results may be less precise.")
+                .font(.caption)
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+private struct SectionHeader: View {
+    let title: String
+    let symbol: String
+    let color: Color
+
+    var body: some View {
+        Label(title, systemImage: symbol)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(color)
+    }
+}
+
+private struct CostFooter: View {
+    let modelID: String
+    let costLabel: String
+
+    var body: some View {
+        HStack {
+            Image(systemName: "sparkles")
+                .font(.caption2)
+                .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+            Text(modelID)
+                .font(.caption2)
+                .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+            Spacer()
+            Text(costLabel)
+                .font(.caption2)
+                .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+        }
+    }
+}
+
+// MARK: - WorkCard
+
+struct WorkCard<Trailing: View>: View {
     let accent: Color
     let symbol: String
     let title: String
+    let badge: String?
+    let badgeColor: Color
     let subtitle: String
     let chip: String
-    let source: String
-    let footer: String
+    let chipSymbol: String
     @ViewBuilder var trailing: Trailing
 
     init(
         accent: Color,
         symbol: String,
         title: String,
+        badge: String?,
+        badgeColor: Color,
         subtitle: String,
         chip: String,
-        source: String,
-        footer: String,
+        chipSymbol: String,
         @ViewBuilder trailing: () -> Trailing = { EmptyView() }
     ) {
         self.accent = accent
         self.symbol = symbol
         self.title = title
+        self.badge = badge
+        self.badgeColor = badgeColor
         self.subtitle = subtitle
         self.chip = chip
-        self.source = source
-        self.footer = footer
+        self.chipSymbol = chipSymbol
         self.trailing = trailing()
     }
 
     var body: some View {
         HStack(spacing: 0) {
-            accent
-                .frame(width: 4)
+            accent.frame(width: 3)
 
-            VStack(alignment: .leading, spacing: 9) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 9) {
                     Image(systemName: symbol)
                         .foregroundStyle(accent)
-                        .frame(width: 20)
+                        .frame(width: 18)
+                        .font(.system(size: 13, weight: .semibold))
 
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(title)
-                            .font(.subheadline.weight(.semibold))
+                            .font(.subheadline.weight(.medium))
                             .foregroundStyle(Color(nsColor: .labelColor))
                             .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
                         Text(subtitle)
                             .font(.caption)
                             .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                     }
 
-                    Spacer()
-                    trailing
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                    Spacer(minLength: 4)
+
+                    VStack(alignment: .trailing, spacing: 4) {
+                        if let badge {
+                            Text(badge)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(badgeColor)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(badgeColor.opacity(0.12), in: Capsule())
+                        }
+                        trailing
+                    }
                 }
 
-                HStack(spacing: 6) {
-                    Chip(text: chip, symbol: "calendar")
-                    Chip(text: source, symbol: "paperclip")
-                }
-
-                Text("Estimated cost: \(footer)")
-                    .font(.caption2)
-                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                Label(chip, systemImage: chipSymbol)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    .lineLimit(1)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
             }
-            .padding(11)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 10)
         }
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.92), in: RoundedRectangle(cornerRadius: 8))
+        .background(
+            Color(nsColor: .textBackgroundColor).opacity(0.9),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
     }
 }
+
+// MARK: - ApprovalCard
 
 private struct ApprovalCard: View {
     @EnvironmentObject private var store: AgentDockStore
     let action: ProposedAction
-    let footer: String
+    let costLabel: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             WorkCard(
                 accent: .green,
                 symbol: "bolt.badge.checkmark.fill",
                 title: action.title,
+                badge: action.tool.rawValue,
+                badgeColor: .green,
                 subtitle: action.details.isEmpty ? action.approvalPrompt : action.details,
-                chip: action.tool.rawValue,
-                source: action.target ?? "Approval required",
-                footer: footer
+                chip: action.target ?? action.tool.rawValue,
+                chipSymbol: "arrow.up.right"
             )
 
             HStack {
@@ -208,6 +349,7 @@ private struct ApprovalCard: View {
                 } label: {
                     Label("Edit first", systemImage: "pencil")
                 }
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
 
                 Spacer()
 
@@ -224,40 +366,39 @@ private struct ApprovalCard: View {
     }
 }
 
+// MARK: - ExecutionLogView
+
 private struct ExecutionLogView: View {
     let logs: [ExecutionLog]
+    @State private var isExpanded = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Execution Log", systemImage: "terminal")
-                .font(.subheadline.weight(.semibold))
-            VStack(alignment: .leading, spacing: 5) {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 4) {
                 ForEach(logs) { log in
-                    Text("[\(log.createdAt.formatted(date: .omitted, time: .standard))] \(log.message)")
-                        .foregroundStyle(log.isError ? .red : Color(nsColor: .labelColor))
+                    HStack(alignment: .top, spacing: 6) {
+                        Circle()
+                            .fill(log.isError ? Color.red : Color.green)
+                            .frame(width: 5, height: 5)
+                            .padding(.top, 3)
+                        Text("[\(log.createdAt.formatted(date: .omitted, time: .standard))] \(log.message)")
+                            .foregroundStyle(log.isError ? .red : Color(nsColor: .labelColor))
+                    }
                 }
             }
-            .font(.system(.caption, design: .monospaced))
+            .font(.system(.caption2, design: .monospaced))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
-            .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            .background(Color.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+            .padding(.top, 6)
+        } label: {
+            Label("Execution Log", systemImage: "terminal")
+                .font(.subheadline.weight(.semibold))
         }
     }
 }
 
-private struct Chip: View {
-    let text: String
-    let symbol: String
-
-    var body: some View {
-        Label(text, systemImage: symbol)
-            .font(.caption2.weight(.medium))
-            .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
-    }
-}
+// MARK: - AgentNoteRow
 
 private struct AgentNoteRow: View {
     let note: AgentNote
@@ -266,7 +407,8 @@ private struct AgentNoteRow: View {
         HStack(alignment: .top, spacing: 9) {
             Image(systemName: note.symbolName)
                 .foregroundStyle(Color(nsColor: .controlAccentColor))
-                .frame(width: 18)
+                .frame(width: 16)
+                .font(.caption)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(note.agentName)

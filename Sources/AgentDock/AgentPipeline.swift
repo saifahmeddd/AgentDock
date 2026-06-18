@@ -42,13 +42,8 @@ struct AgentPipeline {
             proposedActions: proposedActions,
             evidence: buildEvidence(item: item, signals: signals),
             notes: buildNotes(classification: classification, signals: signals, item: item),
-            modelID: nil,
-            inputTokens: nil,
-            outputTokens: nil,
-            estimatedCost: nil,
             usedFallback: false,
-            executionLogs: [],
-            activeAgents: []
+            executionLogs: []
         )
     }
 
@@ -140,8 +135,9 @@ struct AgentPipeline {
             evidence.append(EvidenceItem(label: "Deadline", value: deadline))
         }
 
-        if !signals.people.isEmpty {
-            evidence.append(EvidenceItem(label: "People", value: signals.people.joined(separator: ", ")))
+        let people = signals.people
+        if !people.isEmpty {
+            evidence.append(EvidenceItem(label: "People", value: people.joined(separator: ", ")))
         }
 
         return evidence
@@ -156,7 +152,7 @@ struct AgentPipeline {
             ),
             AgentNote(
                 agentName: "Commitment Agent",
-                summary: "Classified this as \(classification.rawValue.lowercased()) with \(signals.priority.rawValue.lowercased()) priority.",
+                summary: "Classified as \(classification.rawValue.lowercased()) with \(signals.priority.rawValue.lowercased()) priority.",
                 symbolName: "checklist"
             ),
             AgentNote(
@@ -166,11 +162,15 @@ struct AgentPipeline {
             ),
             AgentNote(
                 agentName: "Action Agent",
-                summary: signals.hasAIActionLanguage ? "Found tool-ready action language; approval is required before execution." : "No external tool execution required yet.",
+                summary: signals.hasAIActionLanguage
+                    ? "Found tool-ready action language; approval required before execution."
+                    : "No external tool execution required yet.",
                 symbolName: "bolt.badge.checkmark"
             )
         ]
     }
+
+    // MARK: - Title helpers
 
     private func taskTitle(from text: String) -> String {
         title(prefixes: ["please", "can you", "could you", "need to", "we need to", "i need to"], from: text)
@@ -196,7 +196,6 @@ struct AgentPipeline {
                 }
             }
         }
-
         return fallbackTitle(from: text)
     }
 
@@ -215,13 +214,16 @@ struct AgentPipeline {
     }
 }
 
+// MARK: - Signals
+
 private struct Signals {
     let text: String
 
     var lower: String { text.lowercased() }
 
     var hasTaskLanguage: Bool {
-        containsAny(["please", "can you", "could you", "need to", "we need to", "todo", "action item", "review", "send", "draft", "schedule", "prepare"])
+        containsAny(["please", "can you", "could you", "need to", "we need to", "todo",
+                     "action item", "review", "send", "draft", "schedule", "prepare"])
     }
 
     var hasPromiseLanguage: Bool {
@@ -229,7 +231,8 @@ private struct Signals {
     }
 
     var hasWaitingLanguage: Bool {
-        containsAny(["waiting on", "blocked by", "follow up", "circle back", "checking back", "haven't heard", "hasn't replied"])
+        containsAny(["waiting on", "blocked by", "follow up", "circle back",
+                     "checking back", "haven't heard", "hasn't replied"])
     }
 
     var hasAIActionLanguage: Bool {
@@ -266,61 +269,116 @@ private struct Signals {
     }
 
     var owner: String {
-        if containsAny(["i'll", "i will", "i need to"]) {
-            return "You"
-        }
-        if containsAny(["we need to", "we should", "we will"]) {
-            return "Team"
-        }
+        if containsAny(["i'll", "i will", "i need to"]) { return "You" }
+        if containsAny(["we need to", "we should", "we will"]) { return "Team" }
         return "You"
     }
 
     var responsibleParty: String {
-        if let match = firstMatch(pattern: #"waiting on ([A-Z][a-z]+)"#) {
-            return match
-        }
-        if let match = firstMatch(pattern: #"blocked by ([A-Z][a-z]+)"#) {
-            return match
-        }
+        // Try to extract a name after "waiting on" or "blocked by"
+        if let match = firstNameMatch(after: "waiting on") { return match }
+        if let match = firstNameMatch(after: "blocked by") { return match }
         return "Other person"
     }
 
     var deadline: String? {
         if containsAny(["today", "eod", "end of day"]) { return "today" }
         if containsAny(["tomorrow"]) { return "tomorrow" }
-        if let match = firstMatch(pattern: #"(by|before|on)\s+((Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day)"#) {
+        // "by/before/on <weekday>"
+        if let match = firstMatch(pattern: #"(?:by|before|on)\s+(?:next\s+)?(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"#,
+                                  captureGroup: 1) {
             return match
         }
-        if let match = firstMatch(pattern: #"(by|before|on)\s+([A-Z][a-z]+\s+\d{1,2})"#) {
+        // "by/before/on <Month Day>"
+        if let match = firstMatch(
+            pattern: #"(?:by|before|on)\s+([A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?)"#,
+            captureGroup: 1) {
             return match
         }
-        if let match = firstMatch(pattern: #"\b\d{1,2}/\d{1,2}(/\d{2,4})?\b"#) {
+        // MM/DD
+        if let match = firstMatch(pattern: #"\b(\d{1,2}/\d{1,2}(?:/\d{2,4})?)\b"#, captureGroup: 1) {
             return match
         }
+        // next week / in N days
+        if containsAny(["next week"]) { return "next week" }
         return nil
     }
 
+    // Names: require Title Case First + Last OR known-name patterns.
+    // Excludes common English words, sentence starters, and noise words to avoid false positives.
     var people: [String] {
-        let detectedPeople = matches(pattern: #"\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)?\b"#)
-            .filter { !["I", "We", "The", "This", "Please", "Can", "Could"].contains($0) }
-        return Array(detectedPeople.prefix(5))
+        let stopWords: Set<String> = [
+            "I", "We", "The", "This", "These", "Those", "That", "A", "An",
+            "Please", "Can", "Could", "Should", "Would", "Will", "Shall",
+            "He", "She", "It", "They", "You", "Me", "Us", "Him", "Her",
+            "My", "Our", "Your", "Their", "Its", "His",
+            "And", "Or", "But", "For", "Nor", "So", "Yet",
+            "From", "To", "In", "On", "At", "By", "Of", "As", "Up",
+            "Hi", "Hey", "Dear", "Hello", "Thanks", "Thank",
+            "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December",
+            "Linear", "Notion", "Slack", "Gmail", "Google", "Apple", "Microsoft",
+            "Jira", "GitHub", "Teams", "Zoom", "Figma",
+            "OK", "Yes", "No", "Not", "Also", "Just", "Still", "Already",
+            "Today", "Tomorrow", "Next", "Last", "Now", "Then"
+        ]
+
+        // Require First + Last name pattern (two title-case words) to reduce noise.
+        let fullNamePattern = #"\b([A-Z][a-z]{1,19}\s[A-Z][a-z]{1,19})\b"#
+
+        var found: [String] = []
+
+        // Full names first — high precision
+        let fullNames = matches(pattern: fullNamePattern)
+            .filter { name in
+                let parts = name.components(separatedBy: " ")
+                return parts.count == 2 && parts.allSatisfy { !stopWords.contains($0) }
+            }
+        found.append(contentsOf: fullNames)
+
+        // Single-word names only if after "waiting on", "blocked by", "from:", "@"
+        let contextualPatterns = [
+            #"waiting on ([A-Z][a-z]{2,19})\b"#,
+            #"blocked by ([A-Z][a-z]{2,19})\b"#,
+            #"[Ff]rom:\s*([A-Z][a-z]{2,19})\b"#,
+            #"@([A-Za-z][a-z]{2,19})\b"#
+        ]
+        for pattern in contextualPatterns {
+            let contextMatches = matches(pattern: pattern)
+                .filter { !stopWords.contains($0) }
+            found.append(contentsOf: contextMatches)
+        }
+
+        // Deduplicate while preserving order
+        var seen = Set<String>()
+        return found.filter { seen.insert($0).inserted }.prefix(5).map { $0 }
     }
 
     private func containsAny(_ candidates: [String]) -> Bool {
         candidates.contains { lower.contains($0) }
     }
 
-    private func firstMatch(pattern: String) -> String? {
-        matches(pattern: pattern).first
+    private func firstMatch(pattern: String, captureGroup: Int = 1) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let result = regex.firstMatch(in: text, range: nsRange) else { return nil }
+        let range = captureGroup < result.numberOfRanges ? result.range(at: captureGroup) : result.range
+        guard range.location != NSNotFound, let swiftRange = Range(range, in: text) else { return nil }
+        return String(text[swiftRange])
+    }
+
+    private func firstNameMatch(after keyword: String) -> String? {
+        let pattern = "\(NSRegularExpression.escapedPattern(for: keyword))\\s+([A-Z][a-z]{2,19}(?:\\s[A-Z][a-z]{2,19})?)"
+        return firstMatch(pattern: pattern, captureGroup: 1)
     }
 
     private func matches(pattern: String) -> [String] {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
         return regex.matches(in: text, range: nsRange).compactMap { result in
-            let preferredRange = result.numberOfRanges > 2 ? result.range(at: 2) : result.range(at: 1)
-            let range = preferredRange.location == NSNotFound ? result.range : preferredRange
-            guard let swiftRange = Range(range, in: text) else { return nil }
+            let captureGroup = result.numberOfRanges > 1 ? result.range(at: 1) : result.range
+            guard let swiftRange = Range(captureGroup, in: text) else { return nil }
             return String(text[swiftRange])
         }
     }

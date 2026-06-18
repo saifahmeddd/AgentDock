@@ -17,8 +17,13 @@ final class AppPreferences: ObservableObject {
         }
     }
 
+    // Per-connector auth state, persisted in UserDefaults.
+    // Connector keys are the ActionTool rawValue strings.
+    @Published private var connectorStates: [String: String] = [:]
+
     private static let selectedModelKey = "AgentDock.selectedOpenRouterModel"
     private static let onboardingCompletedKey = "AgentDock.onboardingCompleted"
+    private static let connectorStatesKey = "AgentDock.connectorStates"
     private let keychain: KeychainService
     private let openRouter: OpenRouterService
 
@@ -30,6 +35,17 @@ final class AppPreferences: ObservableObject {
         self.selectedModel = savedModel.flatMap(OpenRouterModel.init(rawValue:)) ?? .grokMini
         self.onboardingCompleted = UserDefaults.standard.bool(forKey: Self.onboardingCompletedKey)
 
+        let saved = UserDefaults.standard.dictionary(forKey: Self.connectorStatesKey) as? [String: String] ?? [:]
+        self.connectorStates = saved
+
+        // Gmail and Calendar are always available via system APIs — no OAuth needed.
+        if connectorStates[ActionTool.gmail.rawValue] == nil {
+            connectorStates[ActionTool.gmail.rawValue] = ConnectorAuthState.connectedViaSystem.rawValue
+        }
+        if connectorStates[ActionTool.calendar.rawValue] == nil {
+            connectorStates[ActionTool.calendar.rawValue] = ConnectorAuthState.connectedViaSystem.rawValue
+        }
+
         Task {
             await refreshSavedKeyState()
         }
@@ -38,6 +54,20 @@ final class AppPreferences: ObservableObject {
     var maskedKeyLabel: String {
         apiKeyIsSaved ? "••••••••••••••••" : "No key saved"
     }
+
+    // MARK: - Connector auth state
+
+    func connectorState(for tool: ActionTool) -> ConnectorAuthState {
+        guard let raw = connectorStates[tool.rawValue] else { return .notConnected }
+        return ConnectorAuthState(rawValue: raw) ?? .notConnected
+    }
+
+    func setConnectorState(_ state: ConnectorAuthState, for tool: ActionTool) {
+        connectorStates[tool.rawValue] = state.rawValue
+        UserDefaults.standard.set(connectorStates, forKey: Self.connectorStatesKey)
+    }
+
+    // MARK: - API Key
 
     func refreshSavedKeyState() async {
         do {
