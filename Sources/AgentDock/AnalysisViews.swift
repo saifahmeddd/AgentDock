@@ -15,47 +15,56 @@ struct AnalysisDetailView: View {
             }
 
             if !analysis.commitments.isEmpty {
-                SectionHeader(title: "Commitments", symbol: "checkmark.circle.fill", color: .orange)
-                ForEach(analysis.commitments) { commitment in
-                    WorkCard(
-                        accent: .orange,
-                        symbol: "checkmark.circle.fill",
-                        title: commitment.title,
-                        badge: commitment.priority.rawValue,
-                        badgeColor: priorityColor(commitment.priority),
-                        subtitle: commitment.owner,
-                        chip: commitment.deadline ?? commitment.reminder,
-                        chipSymbol: "calendar"
-                    ) {
-                        Menu {
-                            ForEach(SnoozeOption.allCases) { option in
-                                Button(option.rawValue) {
-                                    store.snoozeCommitment(commitment, option: option)
-                                }
-                            }
-                        } label: {
-                            Image(systemName: "bell.badge")
-                                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                let pending = analysis.commitments.filter { !$0.isDone }
+                let done = analysis.commitments.filter { $0.isDone }
+
+                SectionHeader(
+                    title: done.isEmpty ? "Commitments" : "Commitments (\(done.count)/\(analysis.commitments.count) done)",
+                    symbol: "checkmark.circle.fill",
+                    color: .orange
+                )
+
+                ForEach(pending) { commitment in
+                    CommitmentCard(commitment: commitment, analysis: analysis)
+                }
+
+                if !done.isEmpty {
+                    DisclosureGroup {
+                        ForEach(done) { commitment in
+                            CommitmentCard(commitment: commitment, analysis: analysis)
                         }
-                        .menuStyle(.borderlessButton)
-                        .help("Snooze reminder")
+                    } label: {
+                        Label("Done (\(done.count))", systemImage: "checkmark.circle")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color(nsColor: .secondaryLabelColor))
                     }
                 }
             }
 
             if !analysis.followUps.isEmpty {
-                SectionHeader(title: "Follow-ups", symbol: "clock.arrow.circlepath", color: .blue)
-                ForEach(analysis.followUps) { followUp in
-                    WorkCard(
-                        accent: .blue,
-                        symbol: "clock.arrow.circlepath",
-                        title: followUp.title,
-                        badge: nil,
-                        badgeColor: .clear,
-                        subtitle: followUp.responsibleParty,
-                        chip: followUp.checkBack,
-                        chipSymbol: "person"
-                    )
+                let pending = analysis.followUps.filter { !$0.isDone }
+                let done = analysis.followUps.filter { $0.isDone }
+
+                SectionHeader(
+                    title: done.isEmpty ? "Follow-ups" : "Follow-ups (\(done.count)/\(analysis.followUps.count) done)",
+                    symbol: "clock.arrow.circlepath",
+                    color: .blue
+                )
+
+                ForEach(pending) { followUp in
+                    FollowUpCard(followUp: followUp, analysis: analysis)
+                }
+
+                if !done.isEmpty {
+                    DisclosureGroup {
+                        ForEach(done) { followUp in
+                            FollowUpCard(followUp: followUp, analysis: analysis)
+                        }
+                    } label: {
+                        Label("Done (\(done.count))", systemImage: "checkmark.circle")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    }
                 }
             }
 
@@ -231,6 +240,93 @@ private struct CostFooter: View {
     }
 }
 
+// MARK: - CommitmentCard / FollowUpCard
+
+private struct CommitmentCard: View {
+    @EnvironmentObject private var store: AgentDockStore
+    let commitment: CommitmentDraft
+    let analysis: AgentAnalysis
+
+    var body: some View {
+        WorkCard(
+            accent: commitment.isDone ? Color(nsColor: .tertiaryLabelColor) : .orange,
+            symbol: commitment.isDone ? "checkmark.circle.fill" : "circle",
+            title: commitment.title,
+            badge: commitment.isDone ? nil : commitment.priority.rawValue,
+            badgeColor: priorityColor(commitment.priority),
+            subtitle: commitment.owner,
+            chip: commitment.deadline ?? commitment.reminder,
+            chipSymbol: "calendar",
+            isDone: commitment.isDone
+        ) {
+            HStack(spacing: 8) {
+                if !commitment.isDone {
+                    Menu {
+                        ForEach(SnoozeOption.allCases) { option in
+                            Button(option.rawValue) {
+                                store.snoozeCommitment(commitment, option: option)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "bell.badge")
+                            .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .help("Snooze reminder")
+                }
+                Button {
+                    store.toggleCommitmentDone(id: commitment.id, inAnalysisID: analysis.id)
+                } label: {
+                    Image(systemName: commitment.isDone ? "arrow.uturn.backward.circle" : "checkmark.circle.fill")
+                        .foregroundStyle(commitment.isDone ? Color(nsColor: .secondaryLabelColor) : .orange)
+                }
+                .buttonStyle(.borderless)
+                .help(commitment.isDone ? "Mark undone" : "Mark done")
+            }
+        }
+        .opacity(commitment.isDone ? 0.55 : 1)
+    }
+
+    private func priorityColor(_ priority: Priority) -> Color {
+        switch priority {
+        case .urgent: .red
+        case .high: .orange
+        case .normal: Color(nsColor: .secondaryLabelColor)
+        case .low: .blue
+        }
+    }
+}
+
+private struct FollowUpCard: View {
+    @EnvironmentObject private var store: AgentDockStore
+    let followUp: FollowUpDraft
+    let analysis: AgentAnalysis
+
+    var body: some View {
+        WorkCard(
+            accent: followUp.isDone ? Color(nsColor: .tertiaryLabelColor) : .blue,
+            symbol: followUp.isDone ? "checkmark.circle.fill" : "clock.arrow.circlepath",
+            title: followUp.title,
+            badge: nil,
+            badgeColor: .clear,
+            subtitle: followUp.responsibleParty,
+            chip: followUp.checkBack,
+            chipSymbol: "person",
+            isDone: followUp.isDone
+        ) {
+            Button {
+                store.toggleFollowUpDone(id: followUp.id, inAnalysisID: analysis.id)
+            } label: {
+                Image(systemName: followUp.isDone ? "arrow.uturn.backward.circle" : "checkmark.circle.fill")
+                    .foregroundStyle(followUp.isDone ? Color(nsColor: .secondaryLabelColor) : .blue)
+            }
+            .buttonStyle(.borderless)
+            .help(followUp.isDone ? "Mark undone" : "Mark done")
+        }
+        .opacity(followUp.isDone ? 0.55 : 1)
+    }
+}
+
 // MARK: - WorkCard
 
 struct WorkCard<Trailing: View>: View {
@@ -242,6 +338,7 @@ struct WorkCard<Trailing: View>: View {
     let subtitle: String
     let chip: String
     let chipSymbol: String
+    let isDone: Bool
     @ViewBuilder var trailing: Trailing
 
     init(
@@ -253,6 +350,7 @@ struct WorkCard<Trailing: View>: View {
         subtitle: String,
         chip: String,
         chipSymbol: String,
+        isDone: Bool = false,
         @ViewBuilder trailing: () -> Trailing = { EmptyView() }
     ) {
         self.accent = accent
@@ -263,6 +361,7 @@ struct WorkCard<Trailing: View>: View {
         self.subtitle = subtitle
         self.chip = chip
         self.chipSymbol = chipSymbol
+        self.isDone = isDone
         self.trailing = trailing()
     }
 
@@ -280,7 +379,8 @@ struct WorkCard<Trailing: View>: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(title)
                             .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Color(nsColor: .labelColor))
+                            .foregroundStyle(isDone ? Color(nsColor: .secondaryLabelColor) : Color(nsColor: .labelColor))
+                            .strikethrough(isDone, color: Color(nsColor: .secondaryLabelColor))
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(subtitle)

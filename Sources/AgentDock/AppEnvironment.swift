@@ -34,5 +34,10 @@ final class AppEnvironment {
         }
 
         store.attachModelContext(ModelContext(modelContainer))
+
+        Task {
+            await DotEnvLoader.loadAndSync()
+            await preferences.refreshSavedKeyState()
+        }
     }
 }

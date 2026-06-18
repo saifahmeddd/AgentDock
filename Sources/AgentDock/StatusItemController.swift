@@ -63,6 +63,7 @@ final class AgentDockStatusController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private var cancellables: [NSObjectProtocol] = []
+    private var settingsWindow: NSWindow?
 
     init(environment: AppEnvironment) {
         self.environment = environment
@@ -163,7 +164,27 @@ final class AgentDockStatusController: NSObject, NSPopoverDelegate {
     }
 
     @objc private func openSettings() {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        if let existing = settingsWindow, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let content = SettingsView()
+            .environmentObject(environment.store)
+            .environmentObject(environment.preferences)
+            .modelContainer(environment.modelContainer)
+            .frame(minWidth: 480, minHeight: 420)
+
+        let controller = NSHostingController(rootView: content)
+        let window = NSWindow(contentViewController: controller)
+        window.title = "AgentDock Settings"
+        window.styleMask = [.titled, .closable, .resizable]
+        window.setContentSize(NSSize(width: 480, height: 560))
+        window.center()
+        window.isReleasedWhenClosed = false
+        settingsWindow = window
+        window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 

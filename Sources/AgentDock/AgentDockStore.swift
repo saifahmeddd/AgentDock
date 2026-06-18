@@ -32,7 +32,7 @@ final class AgentDockStore: ObservableObject {
 
     private let pipeline = AgentPipeline()
     private let intakeService = SmartIntakeService()
-    private let openRouter = OpenRouterService.shared
+    private let llmService = LLMService.shared
     private let archive = SourceArchive.shared
     private let reminders = ReminderScheduler.shared
     private let executor = ConnectorExecutor.shared
@@ -130,6 +130,20 @@ final class AgentDockStore: ObservableObject {
         }
     }
 
+    func toggleCommitmentDone(id: UUID, inAnalysisID: UUID) {
+        guard let aIdx = analyses.firstIndex(where: { $0.id == inAnalysisID }),
+              let cIdx = analyses[aIdx].commitments.firstIndex(where: { $0.id == id }) else { return }
+        analyses[aIdx].commitments[cIdx].isDone.toggle()
+        persistAnalysis(analyses[aIdx])
+    }
+
+    func toggleFollowUpDone(id: UUID, inAnalysisID: UUID) {
+        guard let aIdx = analyses.firstIndex(where: { $0.id == inAnalysisID }),
+              let fIdx = analyses[aIdx].followUps.firstIndex(where: { $0.id == id }) else { return }
+        analyses[aIdx].followUps[fIdx].isDone.toggle()
+        persistAnalysis(analyses[aIdx])
+    }
+
     func snoozeCommitment(_ commitment: CommitmentDraft, option: SnoozeOption) {
         runTask("snooze-commitment") {
             await self.reminders.schedule(
@@ -177,18 +191,18 @@ final class AgentDockStore: ObservableObject {
         let analysis: AgentAnalysis
         if let apiKey = await preferences.loadAPIKey() {
             do {
-                analysis = try await openRouter.analyze(
+                analysis = try await llmService.analyze(
                     item: item,
                     apiKey: apiKey,
                     selectedModel: preferences.selectedModel
                 )
             } catch {
-                await CrashReporter.shared.log(error, context: "openrouter-analysis")
+                await CrashReporter.shared.log(error, context: "nim-analysis")
                 var fallback = pipeline.analyze(item)
                 fallback.notes.append(
                     AgentNote(
                         agentName: "AI Router",
-                        summary: "OpenRouter failed — used local extraction. \(error.localizedDescription)",
+                        summary: "NVIDIA NIM failed — used local extraction. \(error.localizedDescription)",
                         symbolName: "exclamationmark.triangle"
                     )
                 )

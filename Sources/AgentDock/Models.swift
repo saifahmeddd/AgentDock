@@ -80,57 +80,42 @@ enum AgentRole: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-enum OpenRouterModel: String, CaseIterable, Identifiable, Codable {
-    case grokMini = "x-ai/grok-3-mini"
-    case geminiFlash = "google/gemini-2.5-flash"
-    case mistralSmall = "mistralai/mistral-small"
-    case claudeSonnet = "anthropic/claude-sonnet-4.5"
+enum NIMModel: String, CaseIterable, Identifiable, Codable {
+    case llama8b = "meta/llama-3.1-8b-instruct"
+    case llama70b = "meta/llama-3.3-70b-instruct"
+    case mistral7b = "mistralai/mistral-7b-instruct-v0.3"
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .grokMini: "Grok 3 Mini"
-        case .geminiFlash: "Gemini Flash 2.5"
-        case .mistralSmall: "Mistral Small"
-        case .claudeSonnet: "Claude Sonnet 4.5"
+        case .llama8b: "Llama 3.1 8B"
+        case .llama70b: "Llama 3.3 70B"
+        case .mistral7b: "Mistral 7B"
         }
     }
 
     var latencyLabel: String {
         switch self {
-        case .grokMini: "Fast"
-        case .geminiFlash: "Fast"
-        case .mistralSmall: "Fast"
-        case .claudeSonnet: "Moderate"
+        case .llama8b: "Fast"
+        case .llama70b: "Moderate"
+        case .mistral7b: "Fast"
         }
     }
 
-    var inputPricePerMillionTokens: Decimal {
-        switch self {
-        case .grokMini: Decimal(string: "0.30") ?? 0
-        case .geminiFlash: Decimal(string: "0.30") ?? 0
-        case .mistralSmall: Decimal(string: "0.10") ?? 0
-        case .claudeSonnet: Decimal(string: "3.00") ?? 0
-        }
-    }
-
-    var outputPricePerMillionTokens: Decimal {
-        switch self {
-        case .grokMini: Decimal(string: "0.50") ?? 0
-        case .geminiFlash: Decimal(string: "2.50") ?? 0
-        case .mistralSmall: Decimal(string: "0.30") ?? 0
-        case .claudeSonnet: Decimal(string: "15.00") ?? 0
-        }
-    }
+    // NVIDIA NIM free tier — $0 usage
+    var inputPricePerMillionTokens: Decimal { 0 }
+    var outputPricePerMillionTokens: Decimal { 0 }
 
     var costSummary: String {
-        let input = NSDecimalNumber(decimal: inputPricePerMillionTokens).stringValue
-        let output = NSDecimalNumber(decimal: outputPricePerMillionTokens).stringValue
-        return "$\(input) / $\(output) per M tokens"
+        switch self {
+        case .llama8b: "Free · Fast (default)"
+        case .llama70b: "Free · Higher quality"
+        case .mistral7b: "Free · Fastest"
+        }
     }
 
-    static let fallback: OpenRouterModel = .grokMini
+    static let fallback: NIMModel = .llama8b
 }
 
 enum VerificationStatus: Equatable {
@@ -245,6 +230,7 @@ struct CommitmentDraft: Identifiable, Codable {
     var deadline: String?
     var reminder: String
     var sourceProof: String
+    var isDone: Bool
 
     init(
         id: UUID = UUID(),
@@ -253,7 +239,8 @@ struct CommitmentDraft: Identifiable, Codable {
         priority: Priority,
         deadline: String?,
         reminder: String,
-        sourceProof: String
+        sourceProof: String,
+        isDone: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -262,6 +249,7 @@ struct CommitmentDraft: Identifiable, Codable {
         self.deadline = deadline
         self.reminder = reminder
         self.sourceProof = sourceProof
+        self.isDone = isDone
     }
 }
 
@@ -271,19 +259,22 @@ struct FollowUpDraft: Identifiable, Codable {
     var responsibleParty: String
     var checkBack: String
     var sourceProof: String
+    var isDone: Bool
 
     init(
         id: UUID = UUID(),
         title: String,
         responsibleParty: String,
         checkBack: String,
-        sourceProof: String
+        sourceProof: String,
+        isDone: Bool = false
     ) {
         self.id = id
         self.title = title
         self.responsibleParty = responsibleParty
         self.checkBack = checkBack
         self.sourceProof = sourceProof
+        self.isDone = isDone
     }
 }
 

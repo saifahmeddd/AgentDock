@@ -2,7 +2,7 @@ import Foundation
 
 @MainActor
 final class AppPreferences: ObservableObject {
-    @Published var selectedModel: OpenRouterModel {
+    @Published var selectedModel: NIMModel {
         didSet {
             UserDefaults.standard.set(selectedModel.rawValue, forKey: Self.selectedModelKey)
         }
@@ -21,18 +21,18 @@ final class AppPreferences: ObservableObject {
     // Connector keys are the ActionTool rawValue strings.
     @Published private var connectorStates: [String: String] = [:]
 
-    private static let selectedModelKey = "AgentDock.selectedOpenRouterModel"
+    private static let selectedModelKey = "AgentDock.selectedNIMModel"
     private static let onboardingCompletedKey = "AgentDock.onboardingCompleted"
     private static let connectorStatesKey = "AgentDock.connectorStates"
     private let keychain: KeychainService
-    private let openRouter: OpenRouterService
+    private let llmService: LLMService
 
-    init(keychain: KeychainService = .shared, openRouter: OpenRouterService = .shared) {
+    init(keychain: KeychainService = .shared, llmService: LLMService = .shared) {
         self.keychain = keychain
-        self.openRouter = openRouter
+        self.llmService = llmService
 
         let savedModel = UserDefaults.standard.string(forKey: Self.selectedModelKey)
-        self.selectedModel = savedModel.flatMap(OpenRouterModel.init(rawValue:)) ?? .grokMini
+        self.selectedModel = savedModel.flatMap(NIMModel.init(rawValue:)) ?? .llama8b
         self.onboardingCompleted = UserDefaults.standard.bool(forKey: Self.onboardingCompletedKey)
 
         let saved = UserDefaults.standard.dictionary(forKey: Self.connectorStatesKey) as? [String: String] ?? [:]
@@ -111,11 +111,11 @@ final class AppPreferences: ObservableObject {
             }
 
             guard let key = try await keychain.loadAPIKey(), !key.isEmpty else {
-                verificationStatus = .invalid("Add an OpenRouter API key first.")
+                verificationStatus = .invalid("Add an NVIDIA NIM API key first.")
                 return
             }
 
-            let model = try await openRouter.verify(apiKey: key, model: selectedModel)
+            let model = try await llmService.verify(apiKey: key, model: selectedModel)
             verificationStatus = .valid("Verified with \(model).")
         } catch {
             verificationStatus = .invalid(error.localizedDescription)
